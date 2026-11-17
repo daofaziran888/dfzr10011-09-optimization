@@ -53,6 +53,7 @@ npm run dev
 | 任务分片调度 | `shard` | 分片任务 | 分片编号、采集计划、分片范围 |
 | 结果聚合归并 | `merge` | 聚合任务 | 任务编号、采集计划、分片总数 |
 | 节点状态巡检 | `nodecheck` | 巡检记录 | 记录编号、节点编号、CPU使用率 |
+| 聚合失败缺口保护 | `nodecheck/gap-protection`、`merge` | 归并清单/缺口补写/巡检异常 | 任务编号、分片完成水位、缺失分片、补写边界 |
 | 采集流量均衡 | `balance` | 均衡策略 | 策略编号、负载算法、权重因子 |
 | 断点续采恢复 | `resume` | 断点记录 | 断点编号、采集计划、断点位置 |
 | 全局采集看板 | `dashboard` | 看板面板 | 面板编号、面板名称、显示指标 |
@@ -72,6 +73,27 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 聚合失败缺口保护
+
+沿 `shard（分片完成水位）→ merge_manifest（归并清单）→ gap_rewrite（缺口补写台账）
+→ inspect_exception（巡检异常台账）` 的数据流落地，核心规则在
+`backend/app/services/gap_protection.py`：
+
+- 分片总数、已归并数、数据总量只从同一条 `merge_manifest` 记录计算，逐行标注
+  `计算来源`，聚合进度区分 **空结果 / 缺失分片 / 写到一半范围 / 已完成**。
+- 缺口补写只追加、不覆盖；每次只处理当前缺口，并与历史补写记录去重，同一分片
+  不会重复累计。写入失败也落账并保留「续做范围」，续做只补剩余缺口，不会生成
+  第二份完整输出。
+- 两种补写边界并存：`shard_watermark`（分片编号水位，补写结果只含缺失分片，
+  巡检异常按分片编号列出）与 `time_window`（业务时间窗口，补写结果附「扫描但
+  未覆盖的确认记录」，巡检异常按时间窗口汇总）。巡检异常必须指向采用的补写边界。
+- 保护队列与核对清单是派生视图，任何业务入口调用重算接口都会按当前台账重新
+  计算；没有数据时返回空态说明，中断恢复任务附原因与续做分片。
+- 巡检模块的聚合缺口巡检与节点状态巡检（节点 CPU/内存等资源指标）刻意分表，
+  差异可通过 `/api/nodecheck/gap-protection/difference` 复核。
+- 自检脚本（仅依赖标准库，`python3 -I` 运行）：
+  `scripts/verify_gap_protection.py`（领域规则）、`scripts/verify_router_layer.py`（路由层）。
 
 领域：数据工程
 子方向：数据采集、爬虫与RPA

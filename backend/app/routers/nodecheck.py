@@ -1,4 +1,11 @@
-"""节点状态巡检接口：维护巡检记录，覆盖标记异常、隔离节点、恢复节点等动作。"""
+"""节点状态巡检接口。
+
+路由分两组，对应巡检模块里两类不同对象：
+
+* /api/nodecheck/...                节点资源指标巡检（原有口径）
+* /api/nodecheck/gap-protection/... 聚合失败缺口保护：保护队列、核对清单、
+  缺口补写结果台账、聚合任务异常清单、与节点状态巡检的差异说明
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -14,6 +21,52 @@ service = NodecheckService()
 
 LIST_FIELDS = ["记录编号", "节点编号", "CPU使用率", "内存使用率", "磁盘使用率", "网络延迟", "错误次数", "采样时间"]
 STATUSES = ["正常", "亚健康", "异常", "已下线"]
+
+
+# ---- 聚合失败缺口保护（巡检模块） ----------------------------------------
+
+
+@router.get("/gap-protection/queue")
+def protection_queue() -> dict[str, Any]:
+    """聚合失败缺口保护队列：每次调用都按当前台账重算，不返回缓存。
+
+    空结果任务、缺失分片、写到一半范围在队列里分类展示，并附中断恢复说明。
+    """
+    return service.protection_queue()
+
+
+@router.get("/gap-protection/checklist/{task_no}")
+def protection_checklist(task_no: str) -> dict[str, Any]:
+    """单任务保护核对清单：缺口识别、去重依据、分片交叉核对、历史补写与异常。"""
+    checklist, message = service.protection_checklist(task_no)
+    if checklist is None:
+        raise HTTPException(status_code=404, detail=message)
+    return checklist
+
+
+@router.get("/gap-protection/rewrites")
+def gap_rewrites(
+    task_no: str | None = Query(default=None, description="可选：按聚合任务编号过滤"),
+) -> dict[str, Any]:
+    """缺口补写结果数据：只追加台账；没有记录时返回空态与原因说明。"""
+    return service.list_rewrites(task_no)
+
+
+@router.get("/gap-protection/exceptions")
+def gap_exceptions(
+    status: str | None = Query(default=None, description="可选：处理中、已关闭"),
+) -> dict[str, Any]:
+    """聚合任务异常清单：每条异常都指向采用的补写边界与补写依据回指。"""
+    return service.list_exceptions(status)
+
+
+@router.get("/gap-protection/difference")
+def module_difference() -> dict[str, Any]:
+    """巡检模块（缺口保护）与节点状态巡检的差异，以及两种补写边界的做法对比。"""
+    return service.module_difference()
+
+
+# ---- 节点状态巡检（节点资源指标，原有口径） --------------------------------
 
 
 @router.get("", response_model=PageResult[dict])

@@ -1,8 +1,13 @@
-"""结果聚合归并业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""结果聚合归并业务规则：状态流转、字段校验与筛选口径都收在这里。
+
+聚合进度（分片总数、已归并数、数据总量、缺口分类）统一从 merge_manifest 归并清单
+计算，三个指标共用同一条聚合记录，避免各入口口径漂移。
+"""
 from __future__ import annotations
 
 from typing import Any
 
+from app.services import gap_protection as gap
 from app.store import store
 
 MODULE = "merge"
@@ -59,3 +64,58 @@ class MergeService:
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
         return entry, f"聚合任务已{action}"
+
+    # ---- 聚合失败缺口保护：归并侧视图 -------------------------------------
+
+    def manifest_progress(self) -> dict[str, Any]:
+        """聚合进度看板：分片总数/已归并数/数据总量全部来自同一条归并清单。
+
+        空结果、缺失分片、写到一半范围在这里显式区分，前端可直接复核字段。
+        """
+        items: list[dict[str, Any]] = []
+        for manifest in store.rows(gap.MANIFEST_MODULE):
+            progress = gap.compute_progress(manifest)
+            gaps = gap.identify_gaps(manifest)
+            items.append({
+                "任务编号": progress["任务编号"],
+                "采集计划": progress["采集计划"],
+                "分片总数": progress["分片总数"],
+                "已归并数": progress["已归并数"],
+                "数据总量": progress["数据总量"],
+                "部分写入量": progress["部分写入量"],
+                "分片完成水位": progress["分片完成水位"],
+                "进度分类": progress["进度分类"],
+                "进度说明": progress["进度说明"],
+                "待补缺失分片": gaps["待补缺失分片"],
+                "待补写到一半分片": gaps["待补写到一半分片"],
+                "已补写分片": gaps["已补写缺失分片"],
+                "计算来源": progress["计算来源"],
+            })
+        return {
+            "items": items,
+            "total": len(items),
+            "空态说明": (
+                "暂无归并清单：没有可归并分片，归并输出为空结果"
+                if not items else ""
+            ),
+        }
+
+    def get_checklist(self, task_no: str) -> tuple[dict[str, Any] | None, str]:
+        manifest = gap._manifest_by_task(task_no)
+        if manifest is None:
+            return None, f"聚合任务 {task_no} 不存在或已归档"
+        return gap.protection_checklist(manifest), ""
+
+    def rewrite_gap(
+        self,
+        task_no: str,
+        boundary_type: str,
+        values: dict[str, Any],
+        fail_shards: list[int] | None = None,
+    ) -> tuple[dict[str, Any] | None, str]:
+        return gap.rewrite_gap(
+            task_no=task_no,
+            boundary_type=boundary_type,
+            values=values,
+            fail_shards=fail_shards,
+        )

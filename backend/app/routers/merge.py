@@ -1,4 +1,10 @@
-"""结果聚合归并接口：维护聚合任务，覆盖启动归并、重试归并、归档任务等动作。"""
+"""结果聚合归并接口：维护聚合任务，覆盖启动归并、重试归并、归档任务等动作。
+
+另外提供聚合失败缺口保护的归并侧视图：
+* GET  /api/merge/progress              聚合进度（三指标同源于归并清单）
+* GET  /api/merge/{任务编号}/checklist   单任务缺口保护核对清单
+* POST /api/merge/{任务编号}/gap-rewrite 缺口补写（业务时间窗口 / 分片编号水位）
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -28,6 +34,49 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/progress")
+def manifest_progress() -> dict[str, Any]:
+    """聚合进度：分片总数、已归并数、数据总量从同一条归并清单计算。
+
+    进度分类显式区分空结果、缺失分片、写到一半范围与已完成，字段可直接复核。
+    """
+    return service.manifest_progress()
+
+
+@router.get("/manifest/{task_no}/checklist")
+def protection_checklist(task_no: str) -> dict[str, Any]:
+    """单任务聚合失败缺口保护核对清单：缺口、去重依据、交叉核对与历史补写。"""
+    checklist, message = service.get_checklist(task_no)
+    if checklist is None:
+        raise HTTPException(status_code=404, detail=message)
+    return checklist
+
+
+@router.post("/manifest/{task_no}/gap-rewrite", response_model=ActionResult)
+def rewrite_gap(task_no: str, payload: EntryPayload) -> ActionResult:
+    """缺口补写：只处理当前缺口且与历史补写去重，不覆盖已确认数据。
+
+    values 必传 boundary_type：
+    * shard_watermark：传 缺失分片编号（列表），补写结果只含缺失分片；
+    * time_window：传 窗口开始/窗口结束，补写结果附扫描但未覆盖的确认记录。
+    可选 模拟失败分片 用于演示中断恢复；失败落账并保留续做范围，不产生第二份完整输出。
+    """
+    values = payload.values
+    boundary_type = str(values.get("boundary_type") or "").strip()
+    fail_shards = values.get("模拟失败分片")
+    if fail_shards is not None and not isinstance(fail_shards, list):
+        return ActionResult(ok=False, message="模拟失败分片必须是分片编号列表")
+    result, message = service.rewrite_gap(
+        task_no,
+        boundary_type,
+        values,
+        fail_shards=[int(no) for no in fail_shards] if fail_shards else None,
+    )
+    if result is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message=message or "缺口补写已落账", entry=result)
 
 
 @router.get("/{entry_id}", response_model=dict)

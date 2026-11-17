@@ -3,9 +3,10 @@
     <header class="page-head">
       <div>
         <h2>节点状态巡检管理</h2>
-        <p class="page-desc">维护节点状态的资源指标、延迟监控与错误统计，为节点状态巡检提供可审计的数据工程流程。</p>
+        <p class="page-desc">维护节点状态的资源指标、延迟监控与错误统计；本页巡检对象是采集节点（CPU/内存/磁盘等采样指标），聚合任务的缺口巡检请前往聚合失败缺口保护。</p>
       </div>
       <div class="page-actions">
+        <RouterLink class="btn" to="/gap-protection">查看聚合失败缺口保护</RouterLink>
         <button class="btn primary" type="button" @click="openCreate">登记巡检记录</button>
         <button class="btn" type="button" @click="exportRows">导出节点状态巡检清单</button>
       </div>

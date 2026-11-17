@@ -5,6 +5,7 @@ const Cluster = () => import('@/views/cluster/index.vue')
 const Shard = () => import('@/views/shard/index.vue')
 const Merge = () => import('@/views/merge/index.vue')
 const Nodecheck = () => import('@/views/nodecheck/index.vue')
+const GapProtection = () => import('@/views/gap-protection/index.vue')
 const Balance = () => import('@/views/balance/index.vue')
 const Resume = () => import('@/views/resume/index.vue')
 const Dashboard = () => import('@/views/dashboard/index.vue')
@@ -26,6 +27,7 @@ const router = createRouter({
     { path: '/shard', name: 'shard', component: Shard },
     { path: '/merge', name: 'merge', component: Merge },
     { path: '/nodecheck', name: 'nodecheck', component: Nodecheck },
+    { path: '/gap-protection', name: 'gap-protection', component: GapProtection },
     { path: '/balance', name: 'balance', component: Balance },
     { path: '/resume', name: 'resume', component: Resume },
     { path: '/dashboard', name: 'dashboard', component: Dashboard },
